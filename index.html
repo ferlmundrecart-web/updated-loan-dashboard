@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loan Tracker (Private)</title>
+
+<style>
+body {font-family: Arial, sans-serif; background:#f4f6f8; padding:20px;}
+h1{text-align:center}
+.container{max-width:900px;margin:auto}
+.card{background:#fff;padding:20px;margin-bottom:20px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.1)}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border:1px solid #ddd;padding:8px;text-align:center}
+th{background:#1a73e8;color:#fff}
+.paid{color:green;font-weight:bold}
+button{padding:8px 14px;margin:4px;cursor:pointer;border-radius:4px;border:none}
+.add-button{background:#1a73e8;color:#fff}
+.undo-btn{background:orange;color:#fff;margin-left:8px;}
+input{padding:6px;width:220px}
+label{font-weight:bold;display:block;margin-top:8px}
+.center{text-align:center}
+.hidden{display:none}
+.undo-container{margin-top:8px;}
+</style>
+</head>
+
+<body>
+
+<h1>🔐 Private Loan Dashboard</h1>
+
+<!-- BORROWER SEARCH -->
+<div class="card center">
+  <h2>View Your Loan</h2>
+  <input id="searchId" placeholder="Enter Your User ID">
+  <br><br>
+  <button class="add-button" onclick="searchLoan()">View</button>
+</div>
+
+<!-- ADMIN LOGIN -->
+<div id="adminForm" class="card center">
+  <h2>Admin Login</h2>
+  <input id="adminUser" placeholder="Username"><br><br>
+  <input id="adminPass" type="password" placeholder="Password"><br><br>
+  <button class="add-button" id="loginBtn">Login</button>
+</div>
+
+<!-- ADMIN CONTROLS -->
+<div id="adminControls" class="card center hidden">
+  <button class="add-button" onclick="toggleForm()">Add Borrower</button>
+
+  <div id="addForm" class="hidden">
+    <p><b>Next User ID will be assigned automatically</b></p>
+    <label>Borrower Name</label>
+    <input id="name">
+
+    <label>Loan Amount (₱)</label>
+    <input id="amount" type="number">
+
+    <label>Months</label>
+    <input id="months" type="number">
+
+    <label>Release Date</label>
+    <input id="release" type="date">
+
+    <label>Start Payment Date</label>
+    <input id="startPayment" type="date"><br><br>
+
+    <button class="add-button" onclick="saveBorrower()">Save</button>
+  </div>
+</div>
+
+<div class="container" id="list"></div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBzpiOc27Qy0125-Bq1mDC0e-A3wge4U0g",
+  authDomain: "liveproject-5205a.firebaseapp.com",
+  databaseURL: "https://liveproject-5205a-default-rtdb.firebaseio.com",
+  projectId: "liveproject-5205a"
+};
+firebase.initializeApp(firebaseConfig);
+
+const db = firebase.database();
+const ref = db.ref("borrowers");
+
+const ADMIN = { user:"Yuna@081724", pass:"Yuna@081724" };
+let isAdmin = false;
+let allData = {};
+let deleteHistory = [];
+let paidHistory = [];
+
+ref.on("value", s => {
+  allData = s.val() || {};
+  if(isAdmin) render(Object.entries(allData), true);
+});
+
+/* ADMIN LOGIN */
+document.getElementById("loginBtn").onclick = () => {
+  if(document.getElementById("adminUser").value === ADMIN.user && document.getElementById("adminPass").value === ADMIN.pass){
+    isAdmin = true;
+    document.getElementById("adminForm").classList.add("hidden");
+    document.getElementById("adminControls").classList.remove("hidden");
+    render(Object.entries(allData), true);
+  } else alert("Wrong login");
+};
+
+/* TOGGLE ADD FORM */
+function toggleForm(){
+  document.getElementById("addForm").classList.toggle("hidden");
+}
+
+/* GET NEXT USER ID (01, 02, 03 ...) */
+function getNextUserId(){
+  const ids = Object.values(allData).map(b => parseInt(b.uid, 10) || 0);
+  let maxId = ids.length ? Math.max(...ids) : 0;
+  return (maxId + 1).toString().padStart(2,'0'); // 01,02,03...
+}
+
+/* SAVE BORROWER */
+function saveBorrower(){
+  const data = {
+    uid: getNextUserId(),
+    name: document.getElementById("name").value.trim(),
+    amount: +document.getElementById("amount").value,
+    months: +document.getElementById("months").value,
+    release: document.getElementById("release").value,
+    startPayment: document.getElementById("startPayment").value,
+    paid: 0
+  };
+
+  if(!data.name || !data.release || !data.startPayment){
+    return alert("Complete all fields");
+  }
+  if(data.amount <= 0 || data.months <= 0){
+    return alert("Amount and Months must be greater than 0");
+  }
+
+  ref.push(data, error => {
+    if(error){
+      alert("Error saving borrower: " + error);
+    } else {
+      document.getElementById("addForm").querySelectorAll("input").forEach(i => i.value = "");
+      alert(`Borrower added successfully! User ID: ${data.uid}`);
+      ref.once("value", snap => {
+        allData = snap.val() || {};
+        if(isAdmin) render(Object.entries(allData), true);
+      });
+    }
+  });
+}
+
+/* BORROWER SEARCH */
+function searchLoan(){
+  const id = document.getElementById("searchId").value.trim();
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  const result = Object.entries(allData).filter(([_,b]) => b.uid === id);
+  if(!result.length){
+    list.innerHTML = "<p class='center'>❌ No record found</p>";
+    return;
+  }
+
+  render(result, true);
+}
+
+/* DATE LOGIC */
+function getDates(start, m){
+  const dates=[], d=new Date(start);
+  d.setDate(d.getDate()<=5?5:d.getDate()<=20?20:5);
+  if(d.getDate()===5 && new Date(start).getDate()>20) d.setMonth(d.getMonth()+1);
+  for(let i=0;i<m*2;i++){
+    dates.push(new Date(d));
+    d.getDate()===5 ? d.setDate(20) : (d.setMonth(d.getMonth()+1), d.setDate(5));
+  }
+  return dates;
+}
+
+/* RENDER */
+function render(entries, showName){
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  entries.forEach(([id,b])=>{
+    const interest = b.amount * 0.05 * b.months;
+    const total = b.amount + interest;
+    const half = (total / b.months) / 2;
+    const dates = getDates(b.startPayment, b.months);
+
+    list.innerHTML += `
+    <div class="card" id="card-${id}">
+      ${showName ? `<h3>${b.name}</h3>` : ""}
+      <p><b>User ID:</b> ${b.uid}</p>
+      <p><b>Loan Amount:</b> ₱${b.amount.toFixed(2)}</p>
+      <p><b>Interest:</b> ₱${interest.toFixed(2)}</p>
+      <p><b>Total Payable:</b> ₱${total.toFixed(2)}</p>
+      <p><b>Release Date:</b> ${b.release}</p>
+      <p><b>Start Payment:</b> ${b.startPayment}</p>
+
+      <table>
+        <tr><th>Date</th><th>Amount</th><th>Status</th></tr>
+        ${dates.map((d,i)=>`
+          <tr>
+            <td>${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</td>
+            <td>₱${half.toFixed(2)}</td>
+            <td id="status-${id}-${i}">${i<b.paid ? "<span class='paid'>PAID</span>" : isAdmin ? `<button onclick="markPaid('${id}', ${i})">Mark Paid</button>` : ""}</td>
+          </tr>
+        `).join("")}
+      </table>
+
+      ${isAdmin ? `<button onclick="deleteBorrower('${id}')">Delete</button>` : ""}
+      <div class="undo-container" id="undo-${id}"></div>
+    </div>`;
+  });
+}
+
+/* MARK PAID + UNDO */
+function markPaid(id, index){
+  const statusTd = document.getElementById(`status-${id}-${index}`);
+  statusTd.innerHTML = "<span class='paid'>PAID</span>";
+
+  ref.child(id).once("value", snap=>{
+    const b = snap.val();
+    if(!b) return;
+
+    paidHistory.push({id, prevPaid: b.paid});
+    if(paidHistory.length > 50) paidHistory.shift();
+
+    ref.child(id).update({ paid: b.paid + 1 });
+
+    const undoSpan = document.getElementById(`undo-${id}`);
+    undoSpan.innerHTML = `<button class="undo-btn" onclick="undoPaid('${id}')">Undo Paid</button>`;
+
+    setTimeout(()=>{
+      undoSpan.innerHTML = "";
+    }, 10*1000);
+  });
+}
+
+function undoPaid(id){
+  const history = paidHistory.find(h=>h.id===id);
+  if(!history) return alert("Undo expired");
+  ref.child(id).update({ paid: history.prevPaid });
+  paidHistory = paidHistory.filter(h=>h.id!==id);
+  render(Object.entries(allData), isAdmin);
+  alert("Mark Paid undone!");
+}
+
+/* DELETE + UNDO (10s) */
+function deleteBorrower(id){
+  if(!confirm("Delete this borrower?")) return;
+
+  ref.child(id).once("value", snap=>{
+    const data = snap.val();
+    if(!data) return;
+    ref.child(id).remove();
+
+    deleteHistory.push({ id, data, time: Date.now() });
+    if(deleteHistory.length > 50) deleteHistory.shift();
+
+    const undoSpan = document.getElementById(`undo-${id}`);
+    undoSpan.innerHTML = `<button class="undo-btn" onclick="undoDelete('${id}')">Undo Delete</button>`;
+
+    setTimeout(() => {
+      const index = deleteHistory.findIndex(h => h.id === id);
+      if(index !== -1) deleteHistory.splice(index,1);
+      undoSpan.innerHTML = "";
+    }, 10 * 1000);
+  });
+}
+
+function undoDelete(id){
+  const index = deleteHistory.findIndex(h => h.id === id);
+  if(index === -1) return alert("Undo expired");
+  const record = deleteHistory[index];
+  ref.push(record.data);
+  deleteHistory.splice(index,1);
+  alert("Borrower restored!");
+}
+</script>
+
+</body>
+</html>
